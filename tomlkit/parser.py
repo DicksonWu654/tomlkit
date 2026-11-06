@@ -704,11 +704,8 @@ class Parser:
         elems = Container(True)
         # These freshly parsed, keyless items need no editing adjustments.
         # Custom parsers may supply items whose hooks append() must still run.
-        append_trivia = (
-            elems._raw_append
-            if type(self) is Parser and type(self._src) is Source
-            else elems.append
-        )
+        plain_parser = type(self) is Parser and type(self._src) is Source
+        append_trivia = elems._raw_append if plain_parser else elems.append
         expect_key = True
         while True:
             while True:
@@ -734,7 +731,17 @@ class Parser:
                 if self._current == ",":
                     raise self.parse_error(UnexpectedCharError, self._current)
                 key, val = self._parse_key_value(False)
-                elems.add(key, val)
+                if (
+                    plain_parser
+                    and type(key) is SingleKey
+                    and not isinstance(val, (Table, AoT))
+                    and key not in elems._map
+                ):
+                    # A new scalar key has no fragments to merge or validate.
+                    # Dotted keys and duplicates retain the general checks.
+                    elems._raw_append(key, val)
+                else:
+                    elems.add(key, val)
                 expect_key = False
                 continue
 
