@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Speed up parsing key/value pairs whose value is a plain single-line string, such as `name = "tomlkit"`.
 - Speed up repeated array appends by keeping existing indexes instead of rebuilding them.
 
 ### Fixed

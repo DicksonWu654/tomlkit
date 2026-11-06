@@ -89,6 +89,12 @@ _CTRL_MULTI = frozenset(
 _MULTI_LITERAL_STOP = _CTRL_MULTI | {"'", "\r"}  # literal: closing quote or CR
 _MULTI_BASIC_STOP = _CTRL_MULTI | {'"', "\\", "\r"}  # basic: quote, escape or CR
 
+# A bare key followed by an unescaped, nonempty single-line string. All other
+# values (including empty strings and triple quotes) use the general parser.
+_SIMPLE_STRING_KV = re.compile(
+    r"""([ \t]*)([A-Za-z0-9_-]+[ \t]*)(=[ \t]*)(?:"([^"\\\x00-\x08\x0a-\x1f\x7f]+)"|'([^'\x00-\x08\x0a-\x1f\x7f]+)')"""
+)
+
 
 class Parser:
     """
@@ -359,35 +365,48 @@ class Parser:
         return comment_ws, comment, trail
 
     def _parse_key_value(self, parse_comment: bool = False) -> tuple[Key, Item]:
-        # Leading indent
-        self.mark()
-
-        self._src.advance_while(_SPACES)
-
-        indent = self.extract()
-
-        # Key
-        key = self._parse_key()
-
-        self.mark()
-
-        found_equals = self._current == "="
-        while self._current in _KV and self.inc():
-            if self._current == "=":
-                if found_equals:
-                    raise self.parse_error(UnexpectedCharError, "=")
-                else:
-                    found_equals = True
-        if not found_equals:
-            raise self.parse_error(UnexpectedCharError, self._current)
-
-        if not key.sep:
-            key.sep = self.extract()
+        src = self._src
+        match = (
+            _SIMPLE_STRING_KV.match(src, src._idx)
+            if type(self) is Parser and type(src) is Source
+            else None
+        )
+        if match is not None:
+            indent, original, sep, basic, literal = match.groups()
+            key: Key = SingleKey(original.strip(), KeyType.Bare, sep, original)
+            if basic is not None:
+                raw, string_type, group = basic, StringType.SLB, 4
+            else:
+                raw, string_type, group = literal, StringType.SLL, 5
+            val: Item = String(string_type, raw, raw, Trivia())
+            src._idx = match.end()
+            src._current = src[src._idx] if src._idx < len(src) else src.EOF
+            src._marker = match.start(group)
         else:
-            key.sep += self.extract()
+            # Leading indent
+            self.mark()
+            src.advance_while(_SPACES)
+            indent = self.extract()
 
-        # Value
-        val = self._parse_value()
+            key = self._parse_key()
+            self.mark()
+
+            found_equals = self._current == "="
+            while self._current in _KV and self.inc():
+                if self._current == "=":
+                    if found_equals:
+                        raise self.parse_error(UnexpectedCharError, "=")
+                    else:
+                        found_equals = True
+            if not found_equals:
+                raise self.parse_error(UnexpectedCharError, self._current)
+
+            if not key.sep:
+                key.sep = self.extract()
+            else:
+                key.sep += self.extract()
+
+            val = self._parse_value()
         # Comment
         if parse_comment:
             cws, comment, trail = self._parse_comment_trail()
