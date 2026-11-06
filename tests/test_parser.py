@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 import sys
 
@@ -5,16 +7,67 @@ import pytest
 
 from tomlkit import dumps
 from tomlkit import parse
+from tomlkit.container import Container
 from tomlkit.exceptions import EmptyTableNameError
 from tomlkit.exceptions import InternalParserError
 from tomlkit.exceptions import InvalidNumberError
 from tomlkit.exceptions import InvalidUnicodeValueError
+from tomlkit.exceptions import KeyAlreadyPresent
 from tomlkit.exceptions import ParseError
 from tomlkit.exceptions import UnexpectedCharError
+from tomlkit.items import Comment
 from tomlkit.items import Float
 from tomlkit.items import Integer
+from tomlkit.items import Item
 from tomlkit.items import StringType
+from tomlkit.items import Table
+from tomlkit.items import Trivia
+from tomlkit.items import Whitespace
 from tomlkit.parser import Parser
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_inline_table_preserves_comment_and_separator_items(newline: str) -> None:
+    content = newline.join(["a = { \t x=1, # first", "\ty = 2,", " # last", " }", ""])
+    document = parse(content)
+    assert document.as_string() == content
+    assert [type(value) for _, value in document["a"].value.body] == [
+        Whitespace,
+        Integer,
+        Whitespace,
+        Whitespace,
+        Comment,
+        Whitespace,
+        Integer,
+        Whitespace,
+        Whitespace,
+        Comment,
+        Whitespace,
+    ]
+    assert document.unwrap() == {"a": {"x": 1, "y": 2}}
+    document["a"]["x"] = 3
+    assert document.as_string() == content.replace("x=1", "x=3")
+
+
+@pytest.mark.parametrize("key", ["x", "x.y"])
+def test_inline_table_comments_do_not_hide_duplicate_keys(key: str) -> None:
+    with pytest.raises(KeyAlreadyPresent, match=r'Key "x" already exists\.'):
+        parse(f"a = {{ x=1, # split\n {key}=2 }}\n")
+
+
+def test_inline_table_trivia_preserves_custom_parser_item_hooks() -> None:
+    class CheckedContainer(Container):
+        def _previous_item(
+            self, idx: int | None = None, ignore: tuple[type, ...] = ()
+        ) -> Item | None:
+            raise RuntimeError("custom previous-item hook")
+
+    class CustomParser(Parser):
+        def _parse_number(self, raw: str, trivia: Trivia) -> Item | None:
+            return Table(CheckedContainer(True), trivia, False)
+
+    with pytest.raises(RuntimeError, match="custom previous-item hook"):
+        CustomParser("a = { x = 1, }").parse()
 
 
 def test_parser_should_raise_an_internal_error_if_parsing_wrong_type_of_string() -> (

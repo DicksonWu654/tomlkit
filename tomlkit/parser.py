@@ -702,6 +702,13 @@ class Parser:
         self.inc(exception=UnexpectedEofError)
 
         elems = Container(True)
+        # These freshly parsed, keyless items need no editing adjustments.
+        # Custom parsers may supply items whose hooks append() must still run.
+        append_trivia = (
+            elems._raw_append
+            if type(self) is Parser and type(self._src) is Source
+            else elems.append
+        )
         expect_key = True
         while True:
             while True:
@@ -710,13 +717,13 @@ class Parser:
                 self.consume(" \t\n\r")
                 raw = self._src[mark : self._idx]
                 if raw:
-                    elems.add(Whitespace(raw))
+                    append_trivia(None, Whitespace(raw))
 
                 if self._current != "#":
                     break
 
                 cws, comment, trail = self._parse_comment_trail(parse_trail=False)
-                elems.add(Comment(Trivia("", cws, comment, trail)))
+                append_trivia(None, Comment(Trivia("", cws, comment, trail)))
 
             if self._current == "}":
                 # consume closing bracket, EOF here doesn't matter
@@ -734,7 +741,7 @@ class Parser:
             if self._current != ",":
                 raise self.parse_error(UnexpectedCharError, self._current)
 
-            elems.add(Whitespace(","))
+            append_trivia(None, Whitespace(","))
             # consume comma, EOF here is an issue (middle of inline table)
             self.inc(exception=UnexpectedEofError)
             expect_key = True

@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Speed up parsing inline tables by appending their freshly parsed separators, comments and new keys directly instead of through the general editing path.
 - Speed up repeated array appends by keeping existing indexes instead of rebuilding them.
 
 ### Fixed
